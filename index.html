@@ -333,7 +333,7 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
     --shadow:0 2px 12px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.5);
     --shadow-lg:0 16px 40px rgba(0,0,0,0.55), 0 4px 12px rgba(0,0,0,0.5);
   }
-  html,body{transition:background-color .25s ease, color .25s ease;}
+  html,body{transition:background-color .25s ease, color .25s ease;overflow-x:hidden;}
   *{box-sizing:border-box;}
   body{
     margin:0;color:var(--text);font-family:var(--sans);font-size:14px;-webkit-font-smoothing:antialiased;
@@ -363,6 +363,21 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
   .mono{font-family:var(--mono);font-variant-numeric:tabular-nums;}
   @keyframes el-spin{to{transform:rotate(360deg);}}
   @keyframes el-rise{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
+
+  /* Responsive form grid — 4 cols on desktop, collapses on smaller screens */
+  .ev-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px 12px;}
+  .ev-grid > div{min-width:0;}
+  @media (max-width:860px){
+    .ev-grid{grid-template-columns:repeat(2,1fr);}
+    .ev-grid > div{grid-column:auto !important;}   /* cancel span-2/3 so nothing overflows */
+  }
+  @media (max-width:520px){
+    .ev-grid{grid-template-columns:1fr;}
+  }
+  /* Tighter page padding on phones */
+  @media (max-width:520px){
+    .ev-page{padding:18px 13px 48px !important;}
+  }
 </style>
 </head>
 <body>
@@ -660,7 +675,6 @@ function EventForm({event, onSave, onCancel, onDelete}){
   };
 
   const inputStyle = {width:'100%'};
-  const gridStyle = {display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:'14px 12px'};
 
   return (
     <form onSubmit={submit} style={{
@@ -692,7 +706,7 @@ function EventForm({event, onSave, onCancel, onDelete}){
         </div>
       </div>
 
-      <div style={gridStyle}>
+      <div className="ev-grid">
         <Field label="Start date">
           <input style={inputStyle} type="date" value={form.eventDateStart||''} onChange={e=>set('eventDateStart',e.target.value)} required/>
         </Field>
@@ -1028,7 +1042,7 @@ function App(){
   );
 
   return (
-    <div style={{maxWidth:1320, margin:'0 auto', padding:'28px 24px 60px'}}>
+    <div className="ev-page" style={{maxWidth:1320, margin:'0 auto', padding:'28px 24px 60px'}}>
       {themeToggle}
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-end',marginBottom:22,gap:16,flexWrap:'wrap'}}>
         <div style={{display:'flex',alignItems:'center',gap:14}}>
@@ -1046,7 +1060,7 @@ function App(){
             <p style={{margin:'3px 0 0',fontSize:12.5,color:'var(--text-dim)'}}>Bookings, payments and deliverables — all events, one table</p>
           </div>
         </div>
-        <div style={{display:'flex',alignItems:'center',gap:12}}>
+        <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
           <SyncBadge/>
           {undoCount > 0 && (
             <button onClick={handleUndo} disabled={syncing} title="Undo last change" style={{
