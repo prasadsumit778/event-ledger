@@ -372,11 +372,30 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
     .ev-grid > div{grid-column:auto !important;}   /* cancel span-2/3 so nothing overflows */
   }
   @media (max-width:520px){
-    .ev-grid{grid-template-columns:1fr;}
+    .ev-grid{grid-template-columns:1fr;gap:10px;}
   }
-  /* Tighter page padding on phones */
+  /* Compact everything on phones so more fits on screen */
   @media (max-width:520px){
-    .ev-page{padding:18px 13px 48px !important;}
+    .ev-page{padding:16px 12px 44px !important;}
+    /* header */
+    .ev-header{margin-bottom:16px !important;}
+    .ev-logo{width:40px !important;height:40px !important;border-radius:11px !important;}
+    .ev-title{font-size:19px !important;}
+    .ev-eyebrow{font-size:9.5px !important;letter-spacing:0.12em !important;}
+    .ev-tagline{font-size:11.5px !important;}
+    /* inputs & selects */
+    input,select,textarea{padding:7px 9px !important;font-size:13px !important;border-radius:6px !important;}
+    /* stat cards */
+    .ev-stats{gap:9px !important;margin-bottom:14px !important;}
+    .ev-stat{padding:11px 13px !important;border-radius:11px !important;min-width:0 !important;
+             flex:1 1 calc(50% - 9px) !important;}   /* always 2 per row */
+    .ev-stat-head{margin-bottom:5px !important;}
+    .ev-stat-label{font-size:9.5px !important;}
+    .ev-stat-val{font-size:19px !important;}
+    /* form */
+    .ev-form{padding:16px 15px !important;border-radius:13px !important;}
+    .ev-flabel{font-size:10px !important;margin-bottom:3px !important;letter-spacing:0.01em !important;}
+    .ev-form-actions{margin-top:16px !important;padding-top:14px !important;}
   }
 </style>
 </head>
@@ -623,7 +642,7 @@ function StatusPill({value, kind}){
 function Field({label, children, span}){
   return (
     <div style={{gridColumn: span ? 'span '+span : undefined}}>
-      <label style={{display:'block',fontSize:11.5,color:'var(--text-dim)',marginBottom:4,fontWeight:600,letterSpacing:'0.02em',textTransform:'uppercase'}}>{label}</label>
+      <label className="ev-flabel" style={{display:'block',fontSize:11.5,color:'var(--text-dim)',marginBottom:4,fontWeight:600,letterSpacing:'0.02em',textTransform:'uppercase'}}>{label}</label>
       {children}
     </div>
   );
@@ -677,7 +696,7 @@ function EventForm({event, onSave, onCancel, onDelete}){
   const inputStyle = {width:'100%'};
 
   return (
-    <form onSubmit={submit} style={{
+    <form onSubmit={submit} className="ev-form" style={{
       position:'relative', overflow:'hidden',
       background:'var(--panel)', border:'1px solid var(--border)', borderRadius:16,
       padding:'22px 24px', marginBottom:18, boxShadow:'var(--shadow-lg)',
@@ -685,25 +704,10 @@ function EventForm({event, onSave, onCancel, onDelete}){
     }}>
       <div style={{position:'absolute',top:0,left:0,width:'100%',height:4,
         background:'linear-gradient(90deg,var(--accent),var(--accent-dim) 60%,transparent)'}}/>
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18,gap:12,flexWrap:'wrap'}}>
+      <div style={{marginBottom:18}}>
         <h2 style={{margin:0,fontSize:16,fontWeight:800,letterSpacing:'-0.01em',display:'flex',alignItems:'center',gap:8}}>
           <span style={{fontSize:15}}>{isNew ? '✨' : '✏️'}</span>{isNew ? 'New event' : 'Edit event'}
         </h2>
-        <div style={{display:'flex',gap:8}}>
-          {!isNew && (
-            <button type="button" onClick={()=>onDelete(form.id)} style={{
-              background:'var(--red-bg)',border:'1px solid var(--red)',color:'var(--red)',
-              borderRadius:8,padding:'8px 15px',fontWeight:600
-            }}>Delete</button>
-          )}
-          <button type="button" onClick={onCancel} style={{
-            background:'var(--panel)',border:'1px solid var(--border-strong)',borderRadius:8,padding:'8px 15px',color:'var(--text-dim)'
-          }}>Cancel</button>
-          <button type="submit" style={{
-            background:'var(--accent)',border:'1px solid var(--accent)',color:'#3a2c08',
-            borderRadius:8,padding:'8px 18px',fontWeight:700,boxShadow:'var(--shadow-sm)'
-          }}>{isNew ? 'Add event' : 'Save changes'}</button>
-        </div>
       </div>
 
       <div className="ev-grid">
@@ -772,6 +776,25 @@ function EventForm({event, onSave, onCancel, onDelete}){
           <input style={inputStyle} value={form.notes||''} onChange={e=>set('notes',e.target.value)} />
         </Field>
       </div>
+
+      <div className="ev-form-actions" style={{
+        display:'flex',gap:8,marginTop:22,paddingTop:18,borderTop:'1px solid var(--border)',
+        flexWrap:'wrap',alignItems:'center'
+      }}>
+        {!isNew && (
+          <button type="button" onClick={()=>onDelete(form.id)} style={{
+            background:'var(--red-bg)',border:'1px solid var(--red)',color:'var(--red)',
+            borderRadius:8,padding:'9px 16px',fontWeight:600,marginRight:'auto'
+          }}>Delete</button>
+        )}
+        <button type="button" onClick={onCancel} style={{
+          background:'var(--panel)',border:'1px solid var(--border-strong)',borderRadius:8,padding:'9px 16px',color:'var(--text-dim)'
+        }}>Cancel</button>
+        <button type="submit" style={{
+          background:'var(--accent)',border:'1px solid var(--accent)',color:'#3a2c08',
+          borderRadius:8,padding:'9px 20px',fontWeight:700,boxShadow:'var(--shadow-sm)'
+        }}>{isNew ? 'Add event' : 'Save changes'}</button>
+      </div>
     </form>
   );
 }
@@ -779,7 +802,7 @@ function EventForm({event, onSave, onCancel, onDelete}){
 function StatCard({label, value, accent}){
   const tone = accent || 'var(--accent)';
   return (
-    <div
+    <div className="ev-stat"
       onMouseEnter={e=>{e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.boxShadow='var(--shadow-lg)';}}
       onMouseLeave={e=>{e.currentTarget.style.transform='none';e.currentTarget.style.boxShadow='var(--shadow)';}}
       style={{
@@ -790,11 +813,11 @@ function StatCard({label, value, accent}){
       }}>
       <div style={{position:'absolute', top:0, left:0, height:3, width:'100%',
         background:'linear-gradient(90deg,'+tone+', transparent 85%)'}}/>
-      <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:8}}>
+      <div className="ev-stat-head" style={{display:'flex',alignItems:'center',gap:7,marginBottom:8}}>
         <span style={{width:7,height:7,borderRadius:'50%',background:tone,flex:'none'}}/>
-        <span style={{fontSize:11,color:'var(--text-dim)',fontWeight:700,letterSpacing:'0.04em',textTransform:'uppercase'}}>{label}</span>
+        <span className="ev-stat-label" style={{fontSize:11,color:'var(--text-dim)',fontWeight:700,letterSpacing:'0.04em',textTransform:'uppercase'}}>{label}</span>
       </div>
-      <div style={{fontSize:25,fontWeight:800,letterSpacing:'-0.02em',color: accent || 'var(--text)'}}>{value}</div>
+      <div className="ev-stat-val" style={{fontSize:25,fontWeight:800,letterSpacing:'-0.02em',color: accent || 'var(--text)'}}>{value}</div>
     </div>
   );
 }
@@ -1044,20 +1067,20 @@ function App(){
   return (
     <div className="ev-page" style={{maxWidth:1320, margin:'0 auto', padding:'28px 24px 60px'}}>
       {themeToggle}
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-end',marginBottom:22,gap:16,flexWrap:'wrap'}}>
+      <div className="ev-header" style={{display:'flex',justifyContent:'space-between',alignItems:'flex-end',marginBottom:22,gap:16,flexWrap:'wrap'}}>
         <div style={{display:'flex',alignItems:'center',gap:14}}>
-          <img src={LOGO_SRC} alt="Memories in Motion" style={{
+          <img className="ev-logo" src={LOGO_SRC} alt="Memories in Motion" style={{
             width:52,height:52,borderRadius:14,flex:'none',objectFit:'cover',
             border:'1px solid var(--border)',boxShadow:'var(--shadow-sm)'
           }}/>
           <div>
-            <div style={{fontSize:10.5,fontWeight:800,letterSpacing:'0.15em',textTransform:'uppercase',color:'var(--accent)',marginBottom:2}}>Memories in Motion</div>
-            <h1 style={{
+            <div className="ev-eyebrow" style={{fontSize:10.5,fontWeight:800,letterSpacing:'0.15em',textTransform:'uppercase',color:'var(--accent)',marginBottom:2}}>Memories in Motion</div>
+            <h1 className="ev-title" style={{
               margin:0,fontSize:23,fontWeight:800,letterSpacing:'-0.02em',lineHeight:1.1,
               background:'linear-gradient(120deg,var(--text),var(--accent))',
               WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',backgroundClip:'text'
             }}>Event ledger</h1>
-            <p style={{margin:'3px 0 0',fontSize:12.5,color:'var(--text-dim)'}}>Bookings, payments and deliverables — all events, one table</p>
+            <p className="ev-tagline" style={{margin:'3px 0 0',fontSize:12.5,color:'var(--text-dim)'}}>Bookings, payments and deliverables — all events, one table</p>
           </div>
         </div>
         <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
@@ -1114,7 +1137,7 @@ function App(){
         </div>
       )}
 
-      <div style={{display:'flex',gap:12,marginBottom:20,flexWrap:'wrap'}}>
+      <div className="ev-stats" style={{display:'flex',gap:12,marginBottom:20,flexWrap:'wrap'}}>
         <StatCard label="Events shown" value={stats.count} />
         <StatCard label="Total value" value={fmtINR(stats.total)} />
         <StatCard label="Outstanding due" value={fmtINR(stats.due)} accent={stats.due>0 ? 'var(--red)' : 'var(--text)'} />
