@@ -396,7 +396,26 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
     .ev-form{padding:16px 15px !important;border-radius:13px !important;}
     .ev-flabel{font-size:10px !important;margin-bottom:3px !important;letter-spacing:0.01em !important;}
     .ev-form-actions{margin-top:16px !important;padding-top:14px !important;}
+    /* view tabs */
+    .ev-tab{padding:8px 12px !important;font-size:12.5px !important;}
+    .ev-tab-count{font-size:10px !important;padding:1px 5px !important;}
+    .ev-banner{padding:9px 12px !important;font-size:12.5px !important;}
   }
+
+  /* View tabs (All / Upcoming / Past) */
+  .ev-tabs{display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;
+           border-bottom:1px solid var(--border);margin-bottom:14px;}
+  .ev-tab{background:transparent;border:1px solid transparent;border-bottom:3px solid transparent;
+          border-radius:10px 10px 0 0;padding:9px 16px;margin-bottom:-1px;
+          font-size:13px;font-weight:700;letter-spacing:0.01em;color:var(--text-dim);
+          display:inline-flex;align-items:center;gap:8px;}
+  .ev-tab:hover{color:var(--text);background:var(--panel-2);}
+  .ev-tab[aria-selected="true"]{background:var(--accent-soft);border-color:var(--border);
+          border-bottom-color:var(--accent);color:var(--accent);}
+  .ev-tab[aria-selected="true"]:hover{background:var(--accent-soft);color:var(--accent);}
+  .ev-tab-count{font-size:10.5px;font-weight:800;line-height:1;padding:2px 6px;border-radius:999px;
+                background:var(--panel-2);color:var(--text-faint);font-family:var(--mono);}
+  .ev-tab[aria-selected="true"] .ev-tab-count{background:var(--panel);color:var(--accent);}
 </style>
 </head>
 <body>
@@ -613,6 +632,18 @@ function monthLabel(key){
   const [y,m] = key.split('-');
   return new Date(Number(y), Number(m)-1, 1).toLocaleDateString('en-IN',{month:'long',year:'numeric'});
 }
+// Local calendar date as YYYY-MM-DD, so it compares directly against eventDateStart.
+function todayISO(){
+  const d = new Date();
+  return d.getFullYear() + '-' +
+         String(d.getMonth()+1).padStart(2,'0') + '-' +
+         String(d.getDate()).padStart(2,'0');
+}
+// Which tab an event belongs to. Undated events sit in neither — only "All Events".
+function tabOf(iso, today){
+  if(!iso) return null;
+  return iso > today ? 'upcoming' : 'past';
+}
 
 function StatusPill({value, kind}){
   if(!value) return <span style={{color:'var(--text-faint)'}}>—</span>;
@@ -822,6 +853,51 @@ function StatCard({label, value, accent}){
   );
 }
 
+const VIEW_TABS = [
+  {key:'all',      label:'All Events'},
+  {key:'upcoming', label:'Upcoming'},
+  {key:'past',     label:'Past'}
+];
+
+function ViewTabs({value, onChange, counts}){
+  return (
+    <div className="ev-tabs" role="tablist" aria-label="Event view">
+      {VIEW_TABS.map(t=>(
+        <button key={t.key} className="ev-tab" role="tab"
+          aria-selected={value === t.key}
+          onClick={()=>onChange(t.key)}>
+          {t.label}
+          <span className="ev-tab-count">{counts[t.key]}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Soft "N bookings ahead" strip shown only on the Upcoming tab.
+function UpcomingBanner({count, nextDate}){
+  const none = count === 0;
+  return (
+    <div className="ev-banner" style={{
+      display:'flex', alignItems:'center', gap:10, marginBottom:14,
+      background: none ? 'var(--panel-2)' : 'var(--accent-soft)',
+      border:'1px solid ' + (none ? 'var(--border)' : 'var(--accent-dim)'),
+      borderRadius:10, padding:'11px 14px', fontSize:13,
+      color:'var(--text)', boxShadow:'var(--shadow-sm)'
+    }}>
+      <span style={{fontSize:15, lineHeight:1}}>{none ? '🗓️' : '✨'}</span>
+      {none ? (
+        <span style={{color:'var(--text-dim)'}}>No bookings ahead.</span>
+      ) : (
+        <span>
+          <strong style={{fontWeight:800}}>{count} booking{count === 1 ? '' : 's'} ahead</strong>
+          {nextDate && <span style={{color:'var(--text-dim)'}}> · next on {fmtDate(nextDate)}</span>}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function App(){
   const [events, setEvents] = useState([]);
   const [editing, setEditing] = useState(null); // event object being edited, or null
@@ -829,6 +905,7 @@ function App(){
   const [monthFilter, setMonthFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [sortKey, setSortKey] = useState('date_desc');
+  const [viewTab, setViewTab] = useState('all'); // 'all' | 'upcoming' | 'past'
 
   // Light / dark theme (remembered across sessions; unrelated to sheet data)
   const [theme, setTheme] = useState(()=>{
@@ -950,8 +1027,9 @@ function App(){
     return Array.from(set).sort();
   }, [events]);
 
-  const filtered = useMemo(()=>{
-    let list = events.filter(e=>{
+  // Everything the search / month / payment filters allow, before the tab split.
+  const baseFiltered = useMemo(()=>{
+    return events.filter(e=>{
       if(monthFilter !== 'all' && monthKey(e.eventDateStart) !== monthFilter) return false;
       if(statusFilter !== 'all' && e.paymentStatus !== statusFilter) return false;
       if(search.trim()){
@@ -961,6 +1039,25 @@ function App(){
       }
       return true;
     });
+  }, [events, monthFilter, statusFilter, search]);
+
+  // Tab badges count what each tab would show under the current filters.
+  const tabCounts = useMemo(()=>{
+    const today = todayISO();
+    const c = {all: baseFiltered.length, upcoming: 0, past: 0};
+    baseFiltered.forEach(e=>{
+      const t = tabOf(e.eventDateStart, today);
+      if(t) c[t]++;
+    });
+    return c;
+  }, [baseFiltered]);
+
+  const filtered = useMemo(()=>{
+    const today = todayISO();
+    const list = (viewTab === 'all'
+      ? baseFiltered
+      : baseFiltered.filter(e=> tabOf(e.eventDateStart, today) === viewTab)
+    ).slice();
     list.sort((a,b)=>{
       if(sortKey === 'date_desc') return (b.eventDateStart||'').localeCompare(a.eventDateStart||'');
       if(sortKey === 'date_asc') return (a.eventDateStart||'').localeCompare(b.eventDateStart||'');
@@ -969,7 +1066,20 @@ function App(){
       return 0;
     });
     return list;
-  }, [events, monthFilter, statusFilter, search, sortKey]);
+  }, [baseFiltered, viewTab, sortKey]);
+
+  // Soonest upcoming date among what's currently shown — drives the banner.
+  const nextUpcoming = useMemo(()=>{
+    if(viewTab !== 'upcoming') return '';
+    return filtered.reduce((min,e)=>
+      e.eventDateStart && (!min || e.eventDateStart < min) ? e.eventDateStart : min, '');
+  }, [viewTab, filtered]);
+
+  // Switching tabs also picks that tab's natural sort; the dropdown can still override it.
+  const changeTab = useCallback((tab)=>{
+    setViewTab(tab);
+    setSortKey(tab === 'upcoming' ? 'date_asc' : 'date_desc');
+  }, []);
 
   const stats = useMemo(()=>{
     const total = filtered.reduce((s,e)=>s+(e.totalAmount||0),0);
@@ -1153,6 +1263,12 @@ function App(){
         />
       )}
 
+      <ViewTabs value={viewTab} onChange={changeTab} counts={tabCounts} />
+
+      {viewTab === 'upcoming' && (
+        <UpcomingBanner count={filtered.length} nextDate={nextUpcoming} />
+      )}
+
       <div style={{
         display:'flex', gap:10, marginBottom:14, flexWrap:'wrap', alignItems:'center',
         background:'var(--panel)', border:'1px solid var(--border)', borderRadius:12,
@@ -1172,8 +1288,8 @@ function App(){
           {PAYMENT_STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
         </select>
         <select value={sortKey} onChange={e=>setSortKey(e.target.value)}>
-          <option value="date_desc">Newest first</option>
-          <option value="date_asc">Oldest first</option>
+          <option value="date_desc">{viewTab === 'upcoming' ? 'Furthest first' : 'Newest first'}</option>
+          <option value="date_asc">{viewTab === 'upcoming' ? 'Soonest first' : 'Oldest first'}</option>
           <option value="amount_desc">Highest amount</option>
           <option value="client">Client name</option>
         </select>
