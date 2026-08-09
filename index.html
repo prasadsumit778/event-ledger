@@ -400,7 +400,19 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
     .ev-tab{padding:8px 12px !important;font-size:12.5px !important;}
     .ev-tab-count{font-size:10px !important;padding:1px 5px !important;}
     .ev-banner{padding:9px 12px !important;font-size:12.5px !important;}
+    /* type-ahead — roomier tap targets */
+    .ev-ac-opt{padding:9px !important;font-size:12.5px !important;}
   }
+
+  /* Field type-ahead (new event form) */
+  .ev-ac{position:relative;}
+  .ev-ac-menu{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:40;padding:4px;
+              background:var(--panel);border:1px solid var(--border-strong);border-radius:9px;
+              box-shadow:var(--shadow-lg);animation:el-rise .12s ease both;}
+  .ev-ac-opt{padding:7px 9px;border-radius:6px;font-size:13px;color:var(--text);cursor:pointer;
+             white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .ev-ac-opt.is-active{background:var(--accent-soft);box-shadow:inset 2px 0 0 var(--accent);}
+  .ev-ac-hit{color:var(--accent);font-weight:700;}
 
   /* View tabs (All / Upcoming / Past) */
   .ev-tabs{display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;
@@ -679,7 +691,107 @@ function Field({label, children, span}){
   );
 }
 
-function EventForm({event, onSave, onCancel, onDelete}){
+// Bolds the typed substring inside a suggestion.
+function AcMatch({text, query}){
+  const i = query ? text.toLowerCase().indexOf(query.toLowerCase()) : -1;
+  if(i < 0) return <span>{text}</span>;
+  return (
+    <span>
+      {text.slice(0, i)}
+      <span className="ev-ac-hit">{text.slice(i, i + query.length)}</span>
+      {text.slice(i + query.length)}
+    </span>
+  );
+}
+
+const AC_LIMIT = 5;
+
+// Type-ahead over values already in the ledger. Purely a shortcut — the field
+// stays free text, so anything can still be typed.
+function Autocomplete({value, onChange, options, style, ...inputProps}){
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1);
+  const inputRef = useRef(null);
+
+  const query = (value || '').trim();
+  const matches = useMemo(()=>{
+    const q = query.toLowerCase();
+    if(!q) return [];
+    // Skip an exact hit — offering back what's already typed is noise.
+    return options.filter(o => o.toLowerCase().includes(q) && o.toLowerCase() !== q)
+                  .slice(0, AC_LIMIT);
+  }, [query, options]);
+
+  const show = open && matches.length > 0;
+
+  const choose = (v) => {
+    onChange(v);
+    setOpen(false);
+    setActive(-1);
+    if(inputRef.current) inputRef.current.focus();
+  };
+
+  const onKeyDown = (e) => {
+    if(e.key === 'Escape'){
+      if(open){ e.preventDefault(); e.stopPropagation(); setOpen(false); setActive(-1); }
+      return;
+    }
+    if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+      if(!matches.length) return;
+      e.preventDefault();
+      const down = e.key === 'ArrowDown';
+      if(!open){ setOpen(true); setActive(down ? 0 : matches.length - 1); return; }
+      setActive(i=>{
+        const n = matches.length;
+        if(i < 0) return down ? 0 : n - 1;
+        return down ? (i + 1) % n : (i === 0 ? n - 1 : i - 1);
+      });
+      return;
+    }
+    if(e.key === 'Enter'){
+      // Swallow Enter only while a suggestion is highlighted; otherwise the form submits as usual.
+      if(show && active >= 0 && matches[active]){
+        e.preventDefault();
+        choose(matches[active]);
+      }
+    }
+  };
+
+  return (
+    <div className="ev-ac">
+      <input
+        {...inputProps}
+        ref={inputRef}
+        style={style}
+        value={value || ''}
+        autoComplete="off"
+        role="combobox"
+        aria-expanded={show}
+        aria-autocomplete="list"
+        onChange={e=>{ onChange(e.target.value); setOpen(true); setActive(-1); }}
+        onFocus={()=>setOpen(true)}
+        onBlur={()=>{ setOpen(false); setActive(-1); }}
+        onKeyDown={onKeyDown}
+      />
+      {show && (
+        <div className="ev-ac-menu" role="listbox">
+          {matches.map((m,i)=>(
+            <div key={m} role="option" aria-selected={i === active}
+              className={'ev-ac-opt' + (i === active ? ' is-active' : '')}
+              title={m}
+              onMouseDown={e=>e.preventDefault()}  // hold focus so onBlur can't beat the click
+              onMouseEnter={()=>setActive(i)}
+              onClick={()=>choose(m)}>
+              <AcMatch text={m} query={query}/>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EventForm({event, onSave, onCancel, onDelete, suggestions}){
   const [form, setForm] = useState(event);
   const isNew = !event.id;
 
@@ -726,6 +838,21 @@ function EventForm({event, onSave, onCancel, onDelete}){
 
   const inputStyle = {width:'100%'};
 
+  // Type-ahead on new entries only — when editing an existing row, the field
+  // behaves exactly as before.
+  const acField = (key, extra) => (
+    isNew ? (
+      <Autocomplete style={inputStyle} value={form[key] || ''}
+        onChange={v=>set(key, v)}
+        options={(suggestions && suggestions[key]) || []}
+        {...extra}/>
+    ) : (
+      <input style={inputStyle} value={form[key] || ''}
+        onChange={e=>set(key, e.target.value)}
+        {...extra}/>
+    )
+  );
+
   return (
     <form onSubmit={submit} className="ev-form" style={{
       position:'relative', overflow:'hidden',
@@ -749,14 +876,14 @@ function EventForm({event, onSave, onCancel, onDelete}){
           <input style={inputStyle} type="date" value={form.eventDateEnd||''} onChange={e=>set('eventDateEnd',e.target.value)} />
         </Field>
         <Field label="Client name" span={2}>
-          <input style={inputStyle} value={form.clientName||''} onChange={e=>set('clientName',e.target.value)} required/>
+          {acField('clientName', {required:true})}
         </Field>
 
         <Field label="Source / contact">
-          <input style={inputStyle} value={form.source||''} onChange={e=>set('source',e.target.value)} />
+          {acField('source')}
         </Field>
         <Field label="Purpose">
-          <input style={inputStyle} value={form.purpose||''} onChange={e=>set('purpose',e.target.value)} placeholder="Wedding / Corporate / Reel / BTS"/>
+          {acField('purpose', {placeholder:'Wedding / Corporate / Reel / BTS'})}
         </Field>
         <Field label="Deliverables" span={2}>
           <input style={inputStyle} value={form.deliverables||''} onChange={e=>set('deliverables',e.target.value)} placeholder="e.g. 6 reels, 2 stories"/>
@@ -1022,6 +1149,25 @@ function App(){
     await persist(prev);   // no `prev` arg → the undo itself isn't pushed
   }, [persist]);
 
+  // Distinct past values for the new-event type-ahead, most-used first so the
+  // 5-item cap surfaces the names you actually reuse. Built off live state only.
+  const suggestions = useMemo(()=>{
+    const uniq = (key)=>{
+      const seen = new Map();  // lowercased value → {v: first spelling seen, n: uses}
+      events.forEach(e=>{
+        const v = String(e[key] || '').trim();
+        if(!v) return;
+        const k = v.toLowerCase();
+        const hit = seen.get(k);
+        if(hit) hit.n++; else seen.set(k, {v, n:1});
+      });
+      return Array.from(seen.values())
+        .sort((a,b)=> b.n - a.n || a.v.localeCompare(b.v))
+        .map(x=>x.v);
+    };
+    return {clientName: uniq('clientName'), source: uniq('source'), purpose: uniq('purpose')};
+  }, [events]);
+
   const months = useMemo(()=>{
     const set = new Set(events.map(e=>monthKey(e.eventDateStart)));
     return Array.from(set).sort();
@@ -1257,6 +1403,7 @@ function App(){
       {editing && (
         <EventForm
           event={editing}
+          suggestions={suggestions}
           onSave={handleSave}
           onCancel={()=>setEditing(null)}
           onDelete={handleDelete}
