@@ -462,7 +462,7 @@ const HEADERS = {
   eventDateStart:  'Start date',
   eventDateEnd:    'End date (if range)',
   clientName:      'Client name',
-  source:          'Source / contact',
+  source:          'Project Handler',
   purpose:         'Purpose',
   deliverables:    'Deliverables',
   totalAmount:     'Total amount (₹)',
@@ -477,12 +477,23 @@ const HEADERS = {
   notes:           'Notes',
 };
 
+// Labels this app used to write to row 1. A sheet still carrying an old label
+// must keep loading into the same field, or the column would read as empty and
+// the next save would blank it out.
+const LEGACY_HEADERS = {
+  'source / contact': 'source',   // renamed to "Project Handler"
+  'source':           'source',
+};
+
 // Reverse lookup so the loader accepts either a friendly label OR the raw field
 // key as a header cell (keeps older sheets readable during the switch).
 const HEADER_TO_KEY = {};
 COLUMNS.forEach(k => {
   HEADER_TO_KEY[k.toLowerCase()] = k;
   HEADER_TO_KEY[HEADERS[k].toLowerCase()] = k;
+});
+Object.keys(LEGACY_HEADERS).forEach(label => {
+  if(!(label in HEADER_TO_KEY)) HEADER_TO_KEY[label] = LEGACY_HEADERS[label];
 });
 
 // Last column letter for the columns we write (17 -> "Q").
@@ -879,7 +890,7 @@ function EventForm({event, onSave, onCancel, onDelete, suggestions}){
           {acField('clientName', {required:true})}
         </Field>
 
-        <Field label="Source / contact">
+        <Field label="Project Handler">
           {acField('source')}
         </Field>
         <Field label="Purpose">
@@ -1451,7 +1462,7 @@ function App(){
             <tr>
               <th style={thStyle}>Date</th>
               <th style={thStyle}>Client</th>
-              <th style={thStyle}>Source</th>
+              <th style={thStyle}>Project Handler</th>
               <th style={thStyle}>Purpose</th>
               <th style={thStyle}>Deliverables</th>
               <th style={{...thStyle, textAlign:'right'}}>Total</th>
