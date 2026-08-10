@@ -402,7 +402,50 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
     .ev-banner{padding:9px 12px !important;font-size:12.5px !important;}
     /* type-ahead — roomier tap targets */
     .ev-ac-opt{padding:9px !important;font-size:12.5px !important;}
+    /* mini calendar */
+    .ev-cal{max-width:none !important;padding:11px 12px 12px !important;}
+    .ev-cal-cell{height:36px !important;}
+    .ev-cal-pop{width:210px !important;}
+    .ev-cal-k{min-width:78px !important;}
   }
+
+  /* Upcoming mini calendar */
+  .ev-cal{position:relative;max-width:420px;margin-bottom:14px;padding:12px 14px 14px;
+          background:var(--panel);border:1px solid var(--border);border-radius:12px;
+          box-shadow:var(--shadow);}
+  .ev-cal-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px;}
+  .ev-cal-title{font-size:12.5px;font-weight:800;letter-spacing:0.03em;color:var(--text);}
+  .ev-cal-sub{font-size:11px;color:var(--text-dim);font-weight:600;margin-top:1px;}
+  .ev-cal-nav{display:flex;gap:6px;flex:none;}
+  .ev-cal-nav button{width:26px;height:26px;padding:0;line-height:1;border-radius:7px;font-size:15px;font-weight:800;
+          background:var(--panel-2);border:1px solid var(--border);color:var(--text-dim);
+          display:inline-flex;align-items:center;justify-content:center;}
+  .ev-cal-nav button:hover:not(:disabled){background:var(--accent-soft);border-color:var(--accent);color:var(--accent);}
+  .ev-cal-nav button:disabled{opacity:0.3;}
+  .ev-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;}
+  .ev-cal-wd{padding:3px 0 5px;text-align:center;font-size:9.5px;font-weight:800;letter-spacing:0.05em;
+             text-transform:uppercase;color:var(--text-faint);}
+  .ev-cal-cell{position:relative;height:34px;}
+  .ev-cal-day{width:100%;height:100%;padding:0;gap:2px;border:1px solid transparent;border-radius:8px;
+              background:transparent;font-size:12.5px;color:var(--text-dim);font-variant-numeric:tabular-nums;
+              display:flex;flex-direction:column;align-items:center;justify-content:center;}
+  .ev-cal-day.is-today{color:var(--text);font-weight:800;box-shadow:inset 0 0 0 1px var(--border-strong);}
+  .ev-cal-day.is-booked{background:var(--accent-soft);border-color:var(--accent-dim);
+                        color:var(--text);font-weight:700;cursor:pointer;}
+  .ev-cal-day.is-booked:hover{border-color:var(--accent);}
+  .ev-cal-day.is-open{background:var(--accent);border-color:var(--accent);color:#3a2c08;}
+  .ev-cal-dot{width:4px;height:4px;border-radius:50%;background:var(--accent);}
+  .ev-cal-day.is-open .ev-cal-dot{background:#3a2c08;}
+  .ev-cal-pop{position:absolute;top:calc(100% + 6px);z-index:50;width:236px;padding:10px 12px;cursor:default;
+              text-align:left;background:var(--panel);border:1px solid var(--border-strong);border-radius:10px;
+              box-shadow:var(--shadow-lg);animation:el-rise .12s ease both;}
+  .ev-cal-pop-date{margin-bottom:6px;font-size:10px;font-weight:800;letter-spacing:0.06em;
+                   text-transform:uppercase;color:var(--accent);}
+  .ev-cal-row{display:flex;gap:8px;font-size:12px;line-height:1.45;}
+  .ev-cal-row + .ev-cal-row{margin-top:3px;}
+  .ev-cal-k{flex:none;min-width:86px;color:var(--text-dim);}
+  .ev-cal-v{color:var(--text);font-weight:600;overflow-wrap:anywhere;}
+  .ev-cal-sep{height:1px;margin:9px 0;background:var(--border);}
 
   /* Field type-ahead (new event form) */
   .ev-ac{position:relative;}
@@ -1012,26 +1055,178 @@ function ViewTabs({value, onChange, counts}){
   );
 }
 
-// Soft "N bookings ahead" strip shown only on the Upcoming tab.
-function UpcomingBanner({count, nextDate}){
-  const none = count === 0;
+// Plain fallback strip when the Upcoming tab has nothing to show.
+function NoBookingsNote(){
   return (
     <div className="ev-banner" style={{
       display:'flex', alignItems:'center', gap:10, marginBottom:14,
-      background: none ? 'var(--panel-2)' : 'var(--accent-soft)',
-      border:'1px solid ' + (none ? 'var(--border)' : 'var(--accent-dim)'),
-      borderRadius:10, padding:'11px 14px', fontSize:13,
-      color:'var(--text)', boxShadow:'var(--shadow-sm)'
+      background:'var(--panel-2)', border:'1px solid var(--border)',
+      borderRadius:10, padding:'11px 14px', fontSize:13, boxShadow:'var(--shadow-sm)'
     }}>
-      <span style={{fontSize:15, lineHeight:1}}>{none ? '🗓️' : '✨'}</span>
-      {none ? (
-        <span style={{color:'var(--text-dim)'}}>No bookings ahead.</span>
-      ) : (
-        <span>
-          <strong style={{fontWeight:800}}>{count} booking{count === 1 ? '' : 's'} ahead</strong>
-          {nextDate && <span style={{color:'var(--text-dim)'}}> · next on {fmtDate(nextDate)}</span>}
-        </span>
-      )}
+      <span style={{fontSize:15, lineHeight:1}}>🗓️</span>
+      <span style={{color:'var(--text-dim)'}}>No bookings ahead.</span>
+    </div>
+  );
+}
+
+const WEEKDAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+const monthKeyOf = (y,m) => y + '-' + String(m+1).padStart(2,'0');
+const isoOf = (y,m,d) => monthKeyOf(y,m) + '-' + String(d).padStart(2,'0');
+const daysInMonth = (y,m) => new Date(y, m+1, 0).getDate();
+// Monday-first offset for the 1st (JS getDay() is Sunday-first).
+const leadingBlanks = (y,m) => (new Date(y, m, 1).getDay() + 6) % 7;
+
+function PopRow({label, value}){
+  return (
+    <div className="ev-cal-row">
+      <span className="ev-cal-k">{label}</span>
+      <span className="ev-cal-v">{value}</span>
+    </div>
+  );
+}
+
+// Mini month calendar for the Upcoming tab. Marks booked days with a gold dot
+// and opens a details popover on click. Purely a viewer — it never touches the
+// table's search or filters.
+function UpcomingCalendar({events}){
+  const todayKey = todayISO();
+  const [view, setView] = useState(()=>{
+    const d = new Date();
+    return {y:d.getFullYear(), m:d.getMonth()};
+  });
+  const [openDay, setOpenDay] = useState(null);   // ISO date of the open popover
+  const rootRef = useRef(null);
+
+  // ISO date -> events covering it. A dated range marks every day it spans.
+  const byDate = useMemo(()=>{
+    const map = new Map();
+    events.forEach(e=>{
+      const start = e.eventDateStart;
+      if(!start) return;
+      const end = (e.eventDateEnd && e.eventDateEnd > start) ? e.eventDateEnd : start;
+      const cur = new Date(start + 'T00:00:00');
+      const last = new Date(end + 'T00:00:00');
+      if(isNaN(cur) || isNaN(last)) return;
+      // Bounded so a malformed range can't spin forever.
+      for(let i=0; i<400 && cur <= last; i++){
+        const key = isoOf(cur.getFullYear(), cur.getMonth(), cur.getDate());
+        if(!map.has(key)) map.set(key, []);
+        map.get(key).push(e);
+        cur.setDate(cur.getDate() + 1);
+      }
+    });
+    return map;
+  }, [events]);
+
+  // Navigation stays within the months that actually hold bookings.
+  const thisMonth = todayKey.slice(0,7);
+  const {lo, hi} = useMemo(()=>{
+    const months = Array.from(byDate.keys()).map(k=>k.slice(0,7)).sort();
+    const first = months[0], last = months[months.length-1];
+    return {
+      lo: (first && first < thisMonth) ? first : thisMonth,
+      hi: (last && last > thisMonth) ? last : thisMonth
+    };
+  }, [byDate, thisMonth]);
+
+  const viewKey = monthKeyOf(view.y, view.m);
+  const canPrev = viewKey > lo;
+  const canNext = viewKey < hi;
+
+  const step = (delta) => {
+    setOpenDay(null);
+    setView(v=>{
+      const d = new Date(v.y, v.m + delta, 1);
+      return {y:d.getFullYear(), m:d.getMonth()};
+    });
+  };
+
+  // Close on outside click or Escape.
+  useEffect(()=>{
+    if(!openDay) return;
+    const onDown = (ev)=>{
+      if(rootRef.current && !rootRef.current.contains(ev.target)) setOpenDay(null);
+    };
+    const onKey = (ev)=>{ if(ev.key === 'Escape') setOpenDay(null); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return ()=>{
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [openDay]);
+
+  const blanks = leadingBlanks(view.y, view.m);
+  const total = daysInMonth(view.y, view.m);
+  const cells = [];
+  for(let i=0; i<blanks; i++) cells.push(null);
+  for(let d=1; d<=total; d++) cells.push(d);
+  while(cells.length % 7 !== 0) cells.push(null);
+
+  return (
+    <div className="ev-cal" ref={rootRef}>
+      <div className="ev-cal-head">
+        <div>
+          <div className="ev-cal-title">{monthLabel(viewKey)}</div>
+          <div className="ev-cal-sub">
+            {events.length} booking{events.length === 1 ? '' : 's'} ahead
+          </div>
+        </div>
+        <div className="ev-cal-nav">
+          <button type="button" onClick={()=>step(-1)} disabled={!canPrev}
+            aria-label="Previous month" title="Previous month">‹</button>
+          <button type="button" onClick={()=>step(1)} disabled={!canNext}
+            aria-label="Next month" title="Next month">›</button>
+        </div>
+      </div>
+
+      <div className="ev-cal-grid">
+        {WEEKDAYS.map(w=><div key={w} className="ev-cal-wd">{w}</div>)}
+        {cells.map((day, i)=>{
+          if(day === null) return <div key={'b'+i} className="ev-cal-cell"/>;
+          const iso = isoOf(view.y, view.m, day);
+          const list = byDate.get(iso);
+          const open = openDay === iso;
+          const cls = 'ev-cal-day'
+            + (iso === todayKey ? ' is-today' : '')
+            + (list ? ' is-booked' : '')
+            + (open ? ' is-open' : '');
+          if(!list){
+            return <div key={iso} className="ev-cal-cell"><div className={cls}>{day}</div></div>;
+          }
+          // Keep the popover inside the widget on the edge columns.
+          const col = i % 7;
+          const place = col <= 1 ? {left:0}
+                      : col >= 5 ? {right:0}
+                      : {left:'50%', transform:'translateX(-50%)'};
+          return (
+            <div key={iso} className="ev-cal-cell">
+              <button type="button" className={cls}
+                aria-expanded={open}
+                title={list.length + ' booking' + (list.length === 1 ? '' : 's')}
+                onClick={()=>setOpenDay(prev => prev === iso ? null : iso)}>
+                {day}
+                <span className="ev-cal-dot"/>
+              </button>
+              {open && (
+                <div className="ev-cal-pop" style={place} role="dialog">
+                  <div className="ev-cal-pop-date">{fmtDate(iso)}</div>
+                  {list.map((e,n)=>(
+                    <div key={e.id != null ? e.id : n}>
+                      {n > 0 && <div className="ev-cal-sep"/>}
+                      {e.source ? <PopRow label="Project Handler" value={e.source}/> : null}
+                      <PopRow label="Client" value={e.clientName || '—'}/>
+                      <PopRow label="Deliverables" value={e.deliverables || '—'}/>
+                      <PopRow label="Amount" value={fmtINR(e.totalAmount)}/>
+                      <PopRow label="Advance" value={fmtINR(e.advanceReceived)}/>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1225,13 +1420,6 @@ function App(){
     return list;
   }, [baseFiltered, viewTab, sortKey]);
 
-  // Soonest upcoming date among what's currently shown — drives the banner.
-  const nextUpcoming = useMemo(()=>{
-    if(viewTab !== 'upcoming') return '';
-    return filtered.reduce((min,e)=>
-      e.eventDateStart && (!min || e.eventDateStart < min) ? e.eventDateStart : min, '');
-  }, [viewTab, filtered]);
-
   // Switching tabs also picks that tab's natural sort; the dropdown can still override it.
   const changeTab = useCallback((tab)=>{
     setViewTab(tab);
@@ -1424,7 +1612,9 @@ function App(){
       <ViewTabs value={viewTab} onChange={changeTab} counts={tabCounts} />
 
       {viewTab === 'upcoming' && (
-        <UpcomingBanner count={filtered.length} nextDate={nextUpcoming} />
+        filtered.length === 0
+          ? <NoBookingsNote />
+          : <UpcomingCalendar events={filtered} />
       )}
 
       <div style={{
