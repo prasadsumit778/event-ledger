@@ -422,6 +422,10 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
           display:inline-flex;align-items:center;justify-content:center;}
   .ev-cal-nav button:hover:not(:disabled){background:var(--accent-soft);border-color:var(--accent);color:var(--accent);}
   .ev-cal-nav button:disabled{opacity:0.3;}
+  .ev-cal-nav button.ev-cal-sync{width:auto;padding:0 9px;font-size:11.5px;font-weight:700;white-space:nowrap;}
+  .ev-cal-nav button.ev-cal-sync:disabled{opacity:0.6;}
+  .ev-cal-syncmsg{margin:-3px 0 8px;font-size:11px;font-weight:600;color:var(--text-dim);}
+  .ev-cal-syncmsg.is-err{color:var(--red);word-break:break-word;}
   .ev-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;}
   .ev-cal-wd{padding:3px 0 5px;text-align:center;font-size:9.5px;font-weight:800;letter-spacing:0.05em;
              text-transform:uppercase;color:var(--text-faint);}
@@ -658,6 +662,180 @@ async function saveEvents(events){
   await sheetsFetch(SHEET_ID + '/values/' + encodeURIComponent(range) + '?valueInputOption=RAW', {
     method: 'PUT', body: JSON.stringify({ values })
   });
+}
+
+/* ─────────────────  Google Calendar sync (one-way, upcoming only)  ───────────────── */
+
+// Separate token client so the Sheets sign-in/scope stays exactly as it was.
+const CAL_SCOPES = 'https://www.googleapis.com/auth/calendar.events';
+const CAL_ID = 'primary';
+const CAL_ID_PREFIX = 'mimledger';   // base32hex-safe (a–v, 0–9) event id prefix
+// Reminder offsets for all-day events, counted back from 00:00 on the event day.
+const REMIND_DAY_BEFORE  = 15 * 60;                 // 9 AM the day before
+const REMIND_WEEK_BEFORE = 6 * 24 * 60 + 15 * 60;   // 9 AM a week before
+
+let calTokenClient = null;
+let calAccessToken = null;
+
+async function initCalAuth(){
+  await waitForGoogle();
+  if(!calTokenClient){
+    calTokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID,
+      scope: CAL_SCOPES,
+      hint: LOGIN_HINT,
+      callback: () => {}, // set per-request below
+    });
+  }
+}
+
+function requestCalToken(prompt){
+  return new Promise((resolve, reject) => {
+    if(!calTokenClient) return reject(new Error('Calendar auth not initialized.'));
+    calTokenClient.callback = (resp) => {
+      if(resp && resp.error) return reject(new Error(resp.error));
+      calAccessToken = resp.access_token;
+      resolve(resp.access_token);
+    };
+    calTokenClient.error_callback = (err) => reject(new Error((err && err.type) || 'Calendar access was cancelled.'));
+    calTokenClient.requestAccessToken({ prompt: prompt == null ? '' : prompt });
+  });
+}
+
+// Like sheetsFetch: Bearer token, one silent-refresh retry on 401. Returns the
+// raw Response for 404/410 so callers can decide what "missing" means.
+async function calFetch(path, opts = {}, _retried = false){
+  const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(CAL_ID) + path, {
+    ...opts,
+    headers: {
+      'Authorization': 'Bearer ' + calAccessToken,
+      'Content-Type': 'application/json',
+      ...(opts.headers || {})
+    }
+  });
+  if(res.status === 401 && !_retried){
+    await requestCalToken('');
+    return calFetch(path, opts, true);
+  }
+  if(res.status === 404 || res.status === 410) return res;
+  if(!res.ok){
+    const txt = await res.text().catch(()=> '');
+    throw new Error('Calendar API ' + res.status + (txt ? ': ' + txt : ''));
+  }
+  return res;
+}
+
+// Only events with a clean integer id can map to a stable calendar id.
+function calEventId(e){
+  const n = Number(e.id);
+  return (Number.isInteger(n) && n >= 0) ? CAL_ID_PREFIX + n : null;
+}
+
+// YYYY-MM-DD + n days, done in UTC so DST never shifts the date.
+function addDaysISO(iso, n){
+  const [y,m,d] = iso.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m-1, d + n));
+  return t.toISOString().slice(0,10);
+}
+
+function eventToCal(e){
+  const start = e.eventDateStart;
+  const last = (e.eventDateEnd && e.eventDateEnd > start) ? e.eventDateEnd : start;
+  const title = [e.clientName, e.purpose].filter(s => String(s||'').trim()).join(' — ') || 'Booking';
+  const lines = [
+    e.source       && 'Project Handler: ' + e.source,
+    e.purpose      && 'Purpose: ' + e.purpose,
+    e.deliverables && 'Deliverables: ' + e.deliverables,
+    'Total: ' + fmtINR(e.totalAmount) + ' · Advance: ' + fmtINR(e.advanceReceived) + ' · Due: ' + fmtINR(e.dueAmount),
+    e.notes        && 'Notes: ' + e.notes,
+    '',
+    'Synced from Moments in Motion ledger — edit there, not here.'
+  ].filter(l => l !== '' && l != null && l !== false);
+  return {
+    id: calEventId(e),
+    status: 'confirmed',              // revives an id that was deleted earlier
+    summary: title,
+    description: lines.join('\n'),
+    start: { date: start },
+    end:   { date: addDaysISO(last, 1) },   // all-day end date is exclusive
+    transparency: 'opaque',
+    reminders: {
+      useDefault: false,
+      overrides: [
+        { method: 'popup', minutes: REMIND_DAY_BEFORE },
+        { method: 'popup', minutes: REMIND_WEEK_BEFORE },
+      ]
+    },
+    extendedProperties: { private: { mimLedger: '1' } },
+  };
+}
+
+// Upsert: PUT the known id; if it has never existed, create it with that id.
+async function upsertCalEvent(body){
+  const path = '/events/' + encodeURIComponent(body.id);
+  const res = await calFetch(path, { method: 'PUT', body: JSON.stringify(body) });
+  if(res.status !== 404) return;
+  const created = await calFetch('/events', { method: 'POST', body: JSON.stringify(body) });
+  if(created.status === 404) throw new Error('Calendar API 404 creating ' + body.id);
+}
+
+// Every tagged event that ends after now (calendar's own filter), paged.
+async function listTaggedCalEvents(){
+  const out = [];
+  let pageToken = '';
+  do{
+    const q = new URLSearchParams({
+      privateExtendedProperty: 'mimLedger=1',
+      timeMin: new Date().toISOString(),
+      maxResults: '250',
+      singleEvents: 'true',
+    });
+    if(pageToken) q.set('pageToken', pageToken);
+    const res = await calFetch('/events?' + q.toString());
+    if(res.status === 404) break;
+    const data = await res.json();
+    out.push(...(data.items || []));
+    pageToken = data.nextPageToken || '';
+  }while(pageToken);
+  return out;
+}
+
+// Push `upcoming` to the calendar and remove tagged future events that are no
+// longer upcoming. Never reads from or writes to the sheet.
+async function syncCalendar(upcoming, onProgress){
+  await initCalAuth();
+  if(!calAccessToken) await requestCalToken('select_account');
+
+  const syncable = upcoming.filter(e => calEventId(e) && e.eventDateStart);
+  const skipped = upcoming.length - syncable.length;
+  const keep = new Set(syncable.map(calEventId));
+
+  let done = 0;
+  for(const e of syncable){
+    await upsertCalEvent(eventToCal(e));
+    onProgress && onProgress(++done, syncable.length);
+  }
+
+  // "Future" = starts after today, matching tabOf(); today's/ongoing events stay.
+  const today = todayISO();
+  const tagged = await listTaggedCalEvents();
+  let removed = 0;
+  for(const ev of tagged){
+    const startDay = (ev.start && (ev.start.date || (ev.start.dateTime || '').slice(0,10))) || '';
+    if(keep.has(ev.id) || !(startDay > today)) continue;
+    await calFetch('/events/' + encodeURIComponent(ev.id), { method: 'DELETE' });
+    removed++;
+  }
+  return { synced: syncable.length, removed, skipped };
+}
+
+function revokeCalToken(){
+  try{
+    if(calAccessToken && window.google && google.accounts && google.accounts.oauth2){
+      google.accounts.oauth2.revoke(calAccessToken, ()=>{});
+    }
+  }catch(e){}
+  calAccessToken = null;
 }
 
 const PAYMENT_STATUSES = ['Pending','Partial','Paid'];
@@ -1088,8 +1266,25 @@ function PopRow({label, value}){
 // Mini month calendar for the Upcoming tab. Marks booked days with a gold dot
 // and opens a details popover on click. Purely a viewer — it never touches the
 // table's search or filters.
-function UpcomingCalendar({events}){
+function UpcomingCalendar({events, syncEvents}){
   const todayKey = todayISO();
+  const [calSync, setCalSync] = useState({busy:false, msg:'', err:false});
+
+  // One-way push of every upcoming booking (filters ignored) to Google Calendar.
+  const runCalSync = async ()=>{
+    if(calSync.busy) return;
+    setCalSync({busy:true, msg:'Connecting to Google Calendar…', err:false});
+    try{
+      const r = await syncCalendar(syncEvents || [], (n,t)=>
+        setCalSync({busy:true, msg:'Syncing ' + n + '/' + t + '…', err:false}));
+      setCalSync({busy:false, err:false,
+        msg: 'Synced ' + r.synced + ' to Google Calendar'
+           + (r.removed ? ' · removed ' + r.removed : '')
+           + (r.skipped ? ' · skipped ' + r.skipped + ' (no id)' : '')});
+    }catch(err){
+      setCalSync({busy:false, err:true, msg:'Calendar sync failed: ' + (err.message || String(err))});
+    }
+  };
   const [view, setView] = useState(()=>{
     const d = new Date();
     return {y:d.getFullYear(), m:d.getMonth()};
@@ -1173,12 +1368,19 @@ function UpcomingCalendar({events}){
           </div>
         </div>
         <div className="ev-cal-nav">
+          <button type="button" className="ev-cal-sync" onClick={runCalSync} disabled={calSync.busy}
+            title="Push all upcoming bookings to your Google Calendar">
+            {calSync.busy ? '⏳ Syncing' : '📅 Sync'}
+          </button>
           <button type="button" onClick={()=>step(-1)} disabled={!canPrev}
             aria-label="Previous month" title="Previous month">‹</button>
           <button type="button" onClick={()=>step(1)} disabled={!canNext}
             aria-label="Next month" title="Next month">›</button>
         </div>
       </div>
+      {calSync.msg && (
+        <div className={'ev-cal-syncmsg' + (calSync.err ? ' is-err' : '')} role="status">{calSync.msg}</div>
+      )}
 
       <div className="ev-cal-grid">
         {WEEKDAYS.map(w=><div key={w} className="ev-cal-wd">{w}</div>)}
@@ -1310,6 +1512,7 @@ function App(){
       }
     }catch(e){}
     accessToken = null;
+    revokeCalToken();
     loadedRef.current = false;
     undoRef.current = [];
     setUndoCount(0);
@@ -1392,6 +1595,12 @@ function App(){
       return true;
     });
   }, [events, monthFilter, statusFilter, search]);
+
+  // Every upcoming booking regardless of search/filters — what Calendar sync pushes.
+  const allUpcoming = useMemo(()=>{
+    const today = todayISO();
+    return events.filter(e=> tabOf(e.eventDateStart, today) === 'upcoming');
+  }, [events]);
 
   // Tab badges count what each tab would show under the current filters.
   const tabCounts = useMemo(()=>{
@@ -1614,7 +1823,7 @@ function App(){
       {viewTab === 'upcoming' && (
         filtered.length === 0
           ? <NoBookingsNote />
-          : <UpcomingCalendar events={filtered} />
+          : <UpcomingCalendar events={filtered} syncEvents={allUpcoming} />
       )}
 
       <div style={{
